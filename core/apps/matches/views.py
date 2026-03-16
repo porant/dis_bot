@@ -39,7 +39,7 @@ class MatchViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        match: Match = serializer.save()
+        match: Match = serializer.save(status=Match.Status.DRAFT)
 
         if match.captain_1_id:
             match.team_1.add(match.captain_1_id)
@@ -55,6 +55,8 @@ class MatchViewSet(viewsets.ModelViewSet):
             mode=match.mode,
             lobby_id=match.lobby_id,
             lobby_name=match.lobby_name,
+            discord_guild_id=match.discord_guild_id,
+            discord_channel_id=match.discord_channel_id,
         )
 
     @action(detail=True, methods=["post"])
@@ -64,6 +66,10 @@ class MatchViewSet(viewsets.ModelViewSet):
         # уже завершён/победитель есть — запрещаем повтор
         if match.winner_team is not None or match.status == Match.Status.FINISHED:
             return Response({"detail": "Winner already set"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if match.status != Match.Status.IN_PROGRESS:
+            return Response({"detail": "Winner can be set only for in-progress matches"},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         ser = SetWinnerSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -109,3 +115,49 @@ class MatchViewSet(viewsets.ModelViewSet):
             log_match_event(match, MatchEvent.Type.WIN_SET, actor=actor, winner_team=winner)
 
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def mark_ready(self, request, pk=None):
+        match: Match = self.get_object()
+
+        if match.status != Match.Status.DRAFT:
+            return Response({"detail": "Only draft matches can be marked ready"}, status=status.HTTP_400_BAD_REQUEST)
+
+        match.status = Match.Status.READY
+        match.save(update_fields=["status"])
+
+        actor = request.user if request.user.is_authenticated else None
+        log_match_event(match, MatchEvent.Type.READY, actor=actor)
+
+        return Response({"status": "ok", "match_status": match.status}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def mark_ready(self, request, pk=None):
+        match: Match = self.get_object()
+
+        if match.status != Match.Status.DRAFT:
+            return Response({"detail": "Only draft matches can be marked ready"}, status=status.HTTP_400_BAD_REQUEST)
+
+        match.status = Match.Status.READY
+        match.save(update_fields=["status"])
+
+        actor = request.user if request.user.is_authenticated else None
+        log_match_event(match, MatchEvent.Type.READY, actor=actor)
+
+        return Response({"status": "ok", "match_status": match.status}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def cancel_match(self, request, pk=None):
+        match: Match = self.get_object()
+
+        if match.status == Match.Status.FINISHED:
+            return Response({"detail": "Finished match cannot be canceled"}, status=status.HTTP_400_BAD_REQUEST)
+
+        match.status = Match.Status.CANCELED
+        match.finished_at = timezone.now()
+        match.save(update_fields=["status", "finished_at"])
+
+        actor = request.user if request.user.is_authenticated else None
+        log_match_event(match, MatchEvent.Type.CANCELED, actor=actor)
+
+        return Response({"status": "ok", "match_status": match.status}, status=status.HTTP_200_OK)

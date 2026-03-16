@@ -14,10 +14,23 @@ class Match(models.Model):
         M5 = "5x5", "5x5"
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
+        DRAFT = "draft", "Draft"
+        READY = "ready", "Ready"
+        IN_PROGRESS = "in_progress", "In Progress"
         FINISHED = "finished", "Finished"
-        ABANDONED = "abandoned", "Abandoned"
         CANCELED = "canceled", "Canceled"
+
+    class Type(models.TextChoices):
+        CREATED = "created", "Created"
+        CAPTAINS_SELECTED = "captains_selected", "Captains Selected"
+        PLAYER_PICKED = "player_picked", "Player Picked"
+        MAP_PICKED = "map_picked", "Map Picked"
+        SIDE_SELECTED = "side_selected", "Side Selected"
+        READY = "ready", "Ready"
+        STARTED = "started", "Started"
+        WIN_SET = "win_set", "Win Set"
+        CANCELED = "canceled", "Canceled"
+        STATUS_CHANGED = "status_changed", "Status Changed"
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата завершения")
@@ -46,7 +59,7 @@ class Match(models.Model):
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
-        default=Status.PENDING,
+        default=Status.DRAFT,
         db_index=True,
         verbose_name="Статус матча",
     )
@@ -73,6 +86,19 @@ class Match(models.Model):
     overtime = models.BooleanField(default=False, verbose_name="Овертайм")
     forfeit = models.BooleanField(default=False, verbose_name="Форфит")
     forfeit_reason = models.CharField(max_length=128, null=True, blank=True, verbose_name="Причина форфита")
+    discord_guild_id = models.BigIntegerField(null=True, blank=True, db_index=True, verbose_name="Discord Guild ID")
+    discord_channel_id = models.BigIntegerField(null=True, blank=True, db_index=True, verbose_name="Discord Channel ID")
+    discord_message_id = models.BigIntegerField(null=True, blank=True, verbose_name="Discord Message ID")
+    win_message_id = models.BigIntegerField(null=True, blank=True, verbose_name="Win Message ID")
+
+    external_match_key = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        verbose_name="External match key",
+    )
 
     def __str__(self):
         return f"Match {self.id} ({self.mode}) {self.captain_1_id} vs {self.captain_2_id}"

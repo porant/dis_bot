@@ -492,10 +492,11 @@ class Lobby:
                 )
                 return
 
-            await self.channel.send(
+            win_msg = await self.channel.send(
                 "⚔ Капитаны, подтвердите победу, нажав на кнопку ниже:",
                 view=WinButtonView(self)
             )
+            self.win_message_id = win_msg.id
 
         except Exception as e:
             logger.error(f"Ошибка при закрытии лобби: {e}")
@@ -534,6 +535,13 @@ class Lobby:
 
             self.victory_registered = True
             await interaction.followup.send("✅ Победа зафиксирована! Канал удалится через 10 секунд.", ephemeral=True)
+            try:
+                if interaction.message and interaction.message.components:
+                    view = WinButtonView(self)
+                    view.disable_all()
+                    await interaction.message.edit(view=view)
+            except Exception as e:
+                logger.warning(f"Не удалось отключить кнопки победы: {e}")
 
         await asyncio.sleep(10)
         try:
@@ -733,6 +741,9 @@ class WinButtonView(discord.ui.View):
         self.add_item(WinButton(label=f"Победа команды {captain_1}", style=discord.ButtonStyle.red, team=1, lobby=lobby))
         self.add_item(WinButton(label=f"Победа команды {captain_2}", style=discord.ButtonStyle.blurple, team=2, lobby=lobby))
 
+    def disable_all(self):
+        for item in self.children:
+            item.disabled = True
 
 class WinButton(discord.ui.Button):
     def __init__(self, label: str, style: discord.ButtonStyle, team: int, lobby):

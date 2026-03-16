@@ -261,3 +261,20 @@ async def get_player(discord_id: int):
 
 async def get_players():
     return await get_all_players()
+
+async def mark_match_ready(match_id: int):
+    async with await _request("POST", f"matches/{match_id}/mark_ready/") as resp:
+        data = await _safe_json(resp)
+        return resp.status == 200, data
+
+
+async def start_match(match_id: int):
+    async with await _request("POST", f"matches/{match_id}/start_match/") as resp:
+        data = await _safe_json(resp)
+        return resp.status == 200, data
+
+
+async def cancel_match(match_id: int):
+    async with await _request("POST", f"matches/{match_id}/cancel_match/") as resp:
+        data = await _safe_json(resp)
+        return resp.status == 200, data

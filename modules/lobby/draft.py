@@ -263,6 +263,9 @@ class Draft:
                 "lobby_name": getattr(self.lobby, "name", None),
                 "lobby_id": getattr(self.lobby, "lobby_id", None),
                 "external_id": getattr(self.lobby, "external_id", None),
+                "external_match_key": f"{self.guild.id}:{self.channel.id}:{getattr(self.lobby, 'lobby_id', '0')}:{getattr(self.lobby, 'mode', '5x5')}",
+                "discord_guild_id": self.guild.id,
+                "discord_channel_id": self.channel.id,
             }
 
             match_data = await api_client.create_match(match_payload)
@@ -274,6 +277,11 @@ class Draft:
 
             self.match_id = mid
             self.lobby.match_id = mid
+            ok, data = await api_client.mark_match_ready(mid)
+            if not ok:
+                logger.warning(f"Не удалось перевести матч {mid} в READY: {data}")
+            else:
+                logger.success(f"Матч {mid} переведён в READY")
 
             logger.success(f"Матч сохранён в Django: {match_data}")
         except Exception as e:
@@ -308,6 +316,12 @@ class Draft:
         )
 
         await self.finalize_match()
+        if self.match_id:
+            ok, data = await api_client.start_match(self.match_id)
+            if not ok:
+                logger.warning(f"Не удалось перевести матч {self.match_id} в IN_PROGRESS: {data}")
+            else:
+                logger.success(f"Матч {self.match_id} переведён в IN_PROGRESS")
 
     async def create_voice_channels(self):
         category = self.channel.category
