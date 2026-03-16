@@ -278,3 +278,9 @@ async def cancel_match(match_id: int):
     async with await _request("POST", f"matches/{match_id}/cancel_match/") as resp:
         data = await _safe_json(resp)
         return resp.status == 200, data
+
+
+async def get_match(match_id: int):
+    async with await _request("GET", f"matches/{match_id}/") as resp:
+        data = await _safe_json(resp)
+        return resp.status == 200, data

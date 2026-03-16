@@ -528,13 +528,46 @@ class Lobby:
                 await interaction.followup.send("❌ Победа уже зафиксирована ранее.", ephemeral=True)
                 return
 
-            ok, data = await api_client.save_match_result(self.match_id, team)
+            # ✅ 1. Всегда сначала читаем актуальное состояние матча из API
+            ok, match_data = await api_client.get_match(self.match_id)
             if not ok:
-                await interaction.followup.send("❌ Не удалось сохранить победу. Попробуйте ещё раз.", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ Не удалось получить актуальное состояние матча из системы.",
+                    ephemeral=True
+                )
                 return
 
+            match_status = match_data.get("status")
+            winner_team = match_data.get("winner_team")
+
+            if winner_team is not None or match_status == "finished":
+                await interaction.followup.send(
+                    "⚠ Этот матч уже завершён. Повторная запись победы недоступна.",
+                    ephemeral=True
+                )
+                return
+
+            if match_status != "in_progress":
+                await interaction.followup.send(
+                    f"⚠ Победу нельзя записать: матч сейчас в статусе `{match_status}`.",
+                    ephemeral=True
+                )
+                return
+
+            # ✅ 2. Только теперь отправляем результат в API
+            success, result = await api_client.save_match_result(self.match_id, team)
+
+            if not success:
+                await interaction.followup.send(
+                    f"❌ Не удалось сохранить победу в системе.\nОтвет API: `{result}`",
+                    ephemeral=True
+                )
+                return
+
+            # ✅ 3. Только после успешной записи помечаем победу как зафиксированную
             self.victory_registered = True
-            await interaction.followup.send("✅ Победа зафиксирована! Канал удалится через 10 секунд.", ephemeral=True)
+
+            # ✅ 4. Отключаем кнопки победы
             try:
                 if interaction.message and interaction.message.components:
                     view = WinButtonView(self)
@@ -543,7 +576,13 @@ class Lobby:
             except Exception as e:
                 logger.warning(f"Не удалось отключить кнопки победы: {e}")
 
+            await interaction.followup.send(
+                "✅ Победа зафиксирована! Канал удалится через 10 секунд.",
+                ephemeral=True
+            )
+
         await asyncio.sleep(10)
+
         try:
             await self.channel.delete(reason="Лобби завершено и победа зафиксирована.")
         except Exception as e:
