@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord.ui import View
 import random
+import re
 from modules.utils import api_client
 from modules.lobby.draft import Draft
 from loguru import logger
@@ -22,6 +23,8 @@ LOBBY_COUNTERS = {
     "4x4": 0,
     "5x5": 0
 }
+
+ROOM_CODE_REGEX = re.compile(r"^[A-Z0-9]{6}$")
 
 PRIZES_TEXT = (
     "Призы:\n"
@@ -543,7 +546,7 @@ class LobbyRoomCodeModal(discord.ui.Modal, title="Введите код комн
     room_code = discord.ui.TextInput(
         label="Код комнаты",
         placeholder="Введите код комнаты кастомки",
-        max_length=32,
+        max_length=6,
         required=True,
     )
 
@@ -556,16 +559,36 @@ class LobbyRoomCodeModal(discord.ui.Modal, title="Введите код комн
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        code = self.room_code.value.strip()
+        code = self.room_code.value.strip().upper()
+
+        if not ROOM_CODE_REGEX.fullmatch(code):
+            await interaction.followup.send(
+                "❌ Неверный формат кода комнаты. Используйте 6 символов: только английские буквы и цифры.\n"
+                "Пример: `AB12CD`",
+                ephemeral=True
+            )
+            return
 
         category_id = int(os.getenv("LOBBY_CATEGORY_ID", 0))
-        lobby_instance = Lobby(interaction.guild, category_id, max_players=self.size * 2, mode=self.mode)
+        lobby_instance = Lobby(
+            interaction.guild,
+            category_id,
+            max_players=self.size * 2,
+            mode=self.mode
+        )
         lobby_instance.room_code = code
 
         await lobby_instance.create_channel()
 
+        if not lobby_instance.channel:
+            await interaction.followup.send(
+                "❌ Не удалось создать лобби. Попробуйте ещё раз позже.",
+                ephemeral=True
+            )
+            return
+
         await interaction.followup.send(
-            f"Лобби создано: {lobby_instance.channel.mention}\n🔑 Код комнаты: `{code}`",
+            f"✅ Лобби создано: {lobby_instance.channel.mention}\n🔑 Код комнаты: `{code}`",
             ephemeral=True
         )
 
