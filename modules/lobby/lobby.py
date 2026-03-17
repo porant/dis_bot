@@ -425,18 +425,15 @@ class Lobby:
                 score = RANK_ORDER.get(base, 1)
                 player_profiles.append((member, score))
 
-            # сортируем по силе
+            # сортируем по силе: от сильного к слабому
             sorted_players = sorted(player_profiles, key=lambda x: x[1], reverse=True)
 
-            # пул капитанов = топ-4 (или меньше, если игроков меньше)
-            pool_size = min(4, len(sorted_players))
-            captain_pool = [m for m, _ in sorted_players[:pool_size]]
+            # капитаны = два сильнейших игрока
+            self.captains = [sorted_players[0][0], sorted_players[1][0]]
 
-            # выбираем 2 капитана рандомно из пула
-            self.captains = random.sample(captain_pool, 2)
-
-            # кто выбирает первым — тоже рандом
-            random.shuffle(self.captains)
+            # право первого выбора можно оставить случайным
+            if random.choice([True, False]):
+                self.captains.reverse()
 
             # остальные участники
             self.members = [m for m, _ in player_profiles if m not in self.captains]
@@ -481,22 +478,7 @@ class Lobby:
                 )
 
             await self.start_draft()
-
-            await asyncio.sleep(1200)
-
-            # ✅ если матч не создался — не показываем кнопки победы
-            if not await self._wait_match_id(timeout=60.0):
-                await self.channel.send(
-                    "⚠ Матч не создан (нет match_id). Победу сейчас зафиксировать нельзя. "
-                    "Проверьте, что у всех есть профиль и API доступен."
-                )
-                return
-
-            win_msg = await self.channel.send(
-                "⚔ Капитаны, подтвердите победу, нажав на кнопку ниже:",
-                view=WinButtonView(self)
-            )
-            self.win_message_id = win_msg.id
+            asyncio.create_task(self.delayed_win_buttons())
 
         except Exception as e:
             logger.error(f"Ошибка при закрытии лобби: {e}")
@@ -587,6 +569,36 @@ class Lobby:
             await self.channel.delete(reason="Лобби завершено и победа зафиксирована.")
         except Exception as e:
             logger.error(f"❌ Ошибка при удалении текстового канала: {e}")
+
+    async def delayed_win_buttons(self, delay: int = 1200):
+        await asyncio.sleep(delay)
+
+        if not self.channel:
+            return
+
+        if not await self._wait_match_id(timeout=60.0):
+            await self.channel.send(
+                "⚠ Матч не создан (нет match_id). Победу сейчас зафиксировать нельзя. "
+                "Проверьте, что у всех есть профиль и API доступен."
+            )
+            return
+
+        win_msg = await self.channel.send(
+            "⚔ Капитаны, подтвердите победу, нажав на кнопку ниже:",
+            view=WinButtonView(self)
+        )
+        self.win_message_id = win_msg.id
+
+        if getattr(self, "match_id", None):
+            ok, data = await api_client.update_match(
+                self.match_id,
+                {"win_message_id": win_msg.id}
+            )
+            if not ok:
+                logger.warning(
+                    f"⚠ Не удалось сохранить win_message_id={win_msg.id} "
+                    f"для матча {self.match_id}: {data}"
+                )
 
 
 class LobbyRoomCodeModal(discord.ui.Modal, title="Введите код комнаты Valorant"):
@@ -682,91 +694,6 @@ class PrizesButton(discord.ui.Button):
             await interaction.response.send_message(PRIZES_TEXT, ephemeral=True)
         else:
             await interaction.followup.send(PRIZES_TEXT, ephemeral=True)
-
-
-class PlayerProfileModal(discord.ui.Modal, title="Введите Riot ID (Name#TAG)"):
-    username = discord.ui.TextInput(
-        label="Riot ID",
-        placeholder="Например: sweet#b29",
-        max_length=32,
-        required=True,
-    )
-
-    def __init__(self, interaction: discord.Interaction, *, lobby: "Lobby|None" = None):
-        super().__init__(timeout=None)
-        self.lobby = lobby
-        self.interaction = interaction
-
-    async def on_submit(self, interaction: discord.Interaction):
-        # 1) Сразу подтверждаем interaction (иначе 404 Unknown interaction)
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        riot_id = self.username.value.strip()
-
-        # 2) Проверка формата Riot ID
-        if "#" not in riot_id or riot_id.count("#") != 1:
-            await interaction.followup.send(
-                "❌ Riot ID должен быть в формате `Name#TAG` (пример: `sweet#b29`).",
-                ephemeral=True
-            )
-            return
-
-        name, tag = riot_id.split("#", 1)
-        if not name or not tag:
-            await interaction.followup.send(
-                "❌ Riot ID должен быть в формате `Name#TAG` (пример: `sweet#b29`).",
-                ephemeral=True
-            )
-            return
-
-        # 3) Тянем актуальный ранг
-        # по умолчанию считаем Unranked — регистрация не должна падать из-за внешнего сервиса
-        rank = "Unranked"
-        region_used = "—"
-
-        try:
-            rank, region_used = await fetch_valorant_rank(riot_id)
-        except (ValorantRankError, Exception):
-            # Любые проблемы HenrikDev игнорируем, оставляем Unranked
-            pass
-
-        # 4) Сохраняем профиль
-        try:
-            await api_client.update_player_profile(
-                interaction.user.id,
-                username=riot_id,
-                rank=rank,
-                create_if_not_exist=True
-            )
-        except Exception:
-            await interaction.followup.send("❌ Ошибка при сохранении профиля.", ephemeral=True)
-            return
-
-        # сброс кэша, чтобы сразу рисовалась новая инфа
-        await profiles_cache.invalidate(interaction.user.id)
-
-        # 5) Если модалка открывалась при входе в лобби — сразу добавляем
-        if self.lobby:
-            try:
-                await self.lobby.add_member(interaction)
-                await interaction.followup.send(
-                    f"✅ Профиль сохранён и вы добавлены в лобби.\n"
-                    f"Ник: `{riot_id}`\nРанг: **{rank}** (region: `{region_used}`)",
-                    ephemeral=True
-                )
-                return
-            except Exception:
-                await interaction.followup.send(
-                    f"⚠ Профиль сохранён, но вход в лобби не удался.\n"
-                    f"Ник: `{riot_id}`\nРанг: **{rank}** (region: `{region_used}`)",
-                    ephemeral=True
-                )
-                return
-
-        await interaction.followup.send(
-            f"✅ Профиль сохранён.\nНик: `{riot_id}`\nРанг: **{rank}** (region: `{region_used}`)",
-            ephemeral=True
-        )
 
 
 class WinButtonView(discord.ui.View):

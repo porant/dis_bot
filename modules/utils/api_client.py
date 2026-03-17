@@ -284,3 +284,19 @@ async def get_match(match_id: int):
     async with await _request("GET", f"matches/{match_id}/") as resp:
         data = await _safe_json(resp)
         return resp.status == 200, data
+
+
+async def update_match(match_id: int, payload: dict):
+    async with await _request("PATCH", f"matches/{match_id}/", json=payload) as resp:
+        text = await resp.text()
+        ok = resp.status in (200, 202)
+
+        if not ok:
+            logger.error(f"❌ update_match {match_id} failed: {resp.status} - {text[:400]}")
+
+        try:
+            data = json.loads(text) if text else {}
+        except Exception:
+            data = {}
+
+        return ok, data

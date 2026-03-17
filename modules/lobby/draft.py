@@ -210,44 +210,43 @@ class Draft:
                 logger.warning("finalize_match skipped: match already created")
                 return
             self._match_created = True
-        """Сохраняем матч в Django. Перед этим валидируем профили всех участников."""
+
         try:
             async def require_id(member: discord.Member) -> int | None:
-                """Возвращает Django ID игрока или None, если профиля нет."""
                 profile = await api_client.get_player_profile(member.id)
                 if profile and "id" in profile:
                     return profile["id"]
-                # дружелюбное сообщение в канал
+
                 await self.channel.send(
                     f"⚠️ {member.mention}, у тебя нет профиля в системе. "
                     f"Открой `/profile` и заполни ник/ранг, затем запусти драфт заново."
                 )
                 return None
 
-            # Капитаны
             captain_1_id = await require_id(self.captains[0])
             captain_2_id = await require_id(self.captains[1])
 
-            # Команды
             team_1_ids, team_2_ids = [], []
+
             for m in self.teams[self.captains[0]]:
                 pid = await require_id(m)
                 if pid:
                     team_1_ids.append(pid)
+
             for m in self.teams[self.captains[1]]:
                 pid = await require_id(m)
                 if pid:
                     team_2_ids.append(pid)
 
-            # Если кого-то нет — выходим
-            if not captain_1_id or not captain_2_id or \
-                    len(team_1_ids) != len(self.teams[self.captains[0]]) or \
-                    len(team_2_ids) != len(self.teams[self.captains[1]]):
+            if (
+                    not captain_1_id
+                    or not captain_2_id
+                    or len(team_1_ids) != len(self.teams[self.captains[0]])
+                    or len(team_2_ids) != len(self.teams[self.captains[1]])
+            ):
                 self._match_created = False
                 await self.channel.send("⏸ Сохранение матча остановлено — не у всех игроков есть профиль.")
                 return
-
-            self._match_created = True
 
             match_payload = {
                 "captain_1": captain_1_id,
@@ -263,7 +262,11 @@ class Draft:
                 "lobby_name": getattr(self.lobby, "name", None),
                 "lobby_id": getattr(self.lobby, "lobby_id", None),
                 "external_id": getattr(self.lobby, "external_id", None),
-                "external_match_key": f"{self.guild.id}:{self.channel.id}:{getattr(self.lobby, 'lobby_id', '0')}:{getattr(self.lobby, 'mode', '5x5')}",
+                "external_match_key": (
+                    f"{self.guild.id}:{self.channel.id}:"
+                    f"{getattr(self.lobby, 'lobby_id', '0')}:"
+                    f"{getattr(self.lobby, 'mode', '5x5')}"
+                ),
                 "discord_guild_id": self.guild.id,
                 "discord_channel_id": self.channel.id,
             }
@@ -277,6 +280,7 @@ class Draft:
 
             self.match_id = mid
             self.lobby.match_id = mid
+
             ok, data = await api_client.mark_match_ready(mid)
             if not ok:
                 logger.warning(f"Не удалось перевести матч {mid} в READY: {data}")
@@ -284,6 +288,7 @@ class Draft:
                 logger.success(f"Матч {mid} переведён в READY")
 
             logger.success(f"Матч сохранён в Django: {match_data}")
+
         except Exception as e:
             self._match_created = False
             logger.error(f"Ошибка при сохранении матча в Django: {e}")

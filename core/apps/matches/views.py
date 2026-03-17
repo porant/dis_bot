@@ -118,10 +118,13 @@ class MatchViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def mark_ready(self, request, pk=None):
-        match: Match = self.get_object()
+        match = self.get_object()
 
         if match.status != Match.Status.DRAFT:
-            return Response({"detail": "Only draft matches can be marked ready"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Only draft matches can be marked ready"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         match.status = Match.Status.READY
         match.save(update_fields=["status"])
@@ -132,17 +135,20 @@ class MatchViewSet(viewsets.ModelViewSet):
         return Response({"status": "ok", "match_status": match.status}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
-    def mark_ready(self, request, pk=None):
-        match: Match = self.get_object()
+    def start_match(self, request, pk=None):
+        match = self.get_object()
 
-        if match.status != Match.Status.DRAFT:
-            return Response({"detail": "Only draft matches can be marked ready"}, status=status.HTTP_400_BAD_REQUEST)
+        if match.status != Match.Status.READY:
+            return Response(
+                {"detail": "Only ready matches can be started"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        match.status = Match.Status.READY
+        match.status = Match.Status.IN_PROGRESS
         match.save(update_fields=["status"])
 
         actor = request.user if request.user.is_authenticated else None
-        log_match_event(match, MatchEvent.Type.READY, actor=actor)
+        log_match_event(match, MatchEvent.Type.STARTED, actor=actor)
 
         return Response({"status": "ok", "match_status": match.status}, status=status.HTTP_200_OK)
 

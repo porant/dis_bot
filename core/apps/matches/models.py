@@ -107,7 +107,10 @@ class Match(models.Model):
 class MatchEvent(models.Model):
     class Type(models.TextChoices):
         CREATED = "created", "Created"
+        READY = "ready", "Ready"
+        STARTED = "started", "Started"
         WIN_SET = "win_set", "Win Set"
+        CANCELED = "canceled", "Canceled"
         STATUS_CHANGED = "status_changed", "Status Changed"
 
     match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="events")
