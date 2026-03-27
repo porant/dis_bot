@@ -257,6 +257,8 @@ class Lobby:
         self.external_id = str(uuid.uuid4())
         self.room_code: str | None = None
         self.code_message: discord.Message | None = None
+        self.close_task: asyncio.Task | None = None
+        self.close_at: int | None = None
 
     async def _wait_match_id(self, timeout: float = 60.0) -> bool:
         step = 0.2
@@ -317,10 +319,70 @@ class Lobby:
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
+            # Планируем авто-удаление лобби через 3 часа, если драфт не начнётся
+            try:
+                if not self.draft_started:
+                    
+                    asyncio.create_task(self.schedule_close(hours=3))
+            except Exception as e:
+                logger.warning(f"⚠ Не удалось запланировать авто-удаление лобби: {e}")
+
         except Exception as e:
             logger.error(f"Ошибка при создании канала лобби: {e}")
 
         logger.info(f"🆕 Создан текстовый канал: {self.channel.name} ({self.channel.id})")
+
+    async def schedule_close(self, hours: int = 3):
+        """Планирует автоматическое закрытие лобби через указанное количество часов, если драфт не начнётся. И показывет оставшееся время"""
+        try:
+            # Получаем unix timestamp
+            self.close_at = int(time.time() + hours * 3600)
+            ts_line = f"⏰ Лобби будет закрыто: <t:{self.close_at}:R>"
+
+            
+            try:
+                if self.channel:
+                    self.close_message = await self.channel.send(
+                        ts_line,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+            except Exception as e:
+                logger.warning(f"⚠ Не удалось отправить сообщение с таймкодом: {e}")
+
+            try:
+                self.close_task = asyncio.create_task(self._auto_close_countdown(self.close_at))
+            except Exception as e:
+                logger.warning(f"⚠ Не удалось запустить задачу авто-удаления: {e}")
+        except Exception as e:
+            logger.warning(f"⚠ schedule_close failed: {e}")
+
+    async def _auto_close_countdown(self, close_at: int):
+        now = time.time()
+        delay = float(close_at) - now
+        if delay > 0:
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+
+        # Если драфт уже начался — не удаляем
+        if self.draft_started:
+            return
+
+        # Если канал уже удален — не удаляем
+        if not self.channel or not self.guild.get_channel(self.channel.id):
+            return
+
+        try:
+            await self.channel.send("⏰ Время лобби истекло — лобби будет удалено.")
+        except Exception:
+            pass
+
+        try:
+            await self.channel.delete(reason="Автоудаление лобби по таймауту (3 часа)")
+        except Exception as e:
+            logger.error(f"❌ Не удалось удалить канал лобби по таймауту: {e}")
+
 
     async def add_member(self, interaction: discord.Interaction):
         member = interaction.user
@@ -398,6 +460,23 @@ class Lobby:
 
     async def close_lobby(self):
         self.draft_started = True
+
+        # Отменяем авто-удаление, если оно было запланировано
+        try:
+            if getattr(self, "close_task", None) and not self.close_task.done():
+                self.close_task.cancel()
+        except Exception:
+            pass
+        # Удаляем сообщение с таймкодом, если оно было отправлено
+        try:
+            if getattr(self, "close_message", None):
+                try:
+                    await self.close_message.delete()
+                except Exception:
+                    pass
+                self.close_message = None
+        except Exception:
+            pass
 
         if len(self.members) < 2:
             await self.channel.send("❌ Недостаточно игроков для драфта. Лобби будет закрыто.")
@@ -485,6 +564,22 @@ class Lobby:
 
     async def start_draft(self):
         try:
+            # Отменяем авто-удаление, если оно было запланировано
+            try:
+                if getattr(self, "close_task", None) and not self.close_task.done():
+                    self.close_task.cancel()
+            except Exception:
+                pass
+            # Удаляем сообщение с таймкодом, если оно было отправлено
+            try:
+                if getattr(self, "close_message", None):
+                    try:
+                        await self.close_message.delete()
+                    except Exception:
+                        pass
+                    self.close_message = None
+            except Exception:
+                pass
             self.draft = Draft(self, self.guild, self.channel, self.captains, self.members)
             await self.draft.start()
         except Exception as e:
